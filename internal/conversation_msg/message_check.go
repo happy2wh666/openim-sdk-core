@@ -544,16 +544,16 @@ func (c *Conversation) pullMessageIntoTable(ctx context.Context, pullMsgData map
 // Depending on the conversation type, it delegates the handling to either singleHandle (for single chats)
 // or groupHandle (for group chats). If conversation information retrieval fails, it returns the merged chat logs.
 func (c *Conversation) faceURLAndNicknameHandle(ctx context.Context, self, others []*model_struct.LocalChatLog, conversationID string) []*model_struct.LocalChatLog {
-	lc, err := c.db.GetConversation(ctx, conversationID)
-	if err != nil {
-		return append(self, others...)
-	}
-	switch lc.ConversationType {
-	case constant.SingleChatType:
-		c.singleHandle(ctx, self, others, lc)
-	case constant.ReadGroupChatType:
-		c.groupHandle(ctx, self, others, lc)
-	}
+	//lc, err := c.db.GetConversation(ctx, conversationID)
+	//if err != nil {
+	//	return append(self, others...)
+	//}
+	//switch lc.ConversationType {
+	//case constant.SingleChatType:
+	//	c.singleHandle(ctx, self, others, lc)
+	//case constant.ReadGroupChatType:
+	//	c.groupHandle(ctx, self, others, lc)
+	//}
 	return append(self, others...)
 }
 
@@ -562,22 +562,22 @@ func (c *Conversation) faceURLAndNicknameHandle(ctx context.Context, self, other
 // using the logged-in user's information, and for messages in the `others` list
 // using the other party's information if available in the conversation.
 func (c *Conversation) singleHandle(ctx context.Context, self, others []*model_struct.LocalChatLog, lc *model_struct.LocalConversation) {
-	if len(self) > 0 {
-		userInfo, err := c.db.GetLoginUser(ctx, c.loginUserID)
-		if err == nil {
-			for _, chatLog := range self {
-				chatLog.SenderFaceURL = userInfo.FaceURL
-				chatLog.SenderNickname = userInfo.Nickname
-			}
-		}
-	}
-
-	if lc.FaceURL != "" && lc.ShowName != "" {
-		for _, chatLog := range others {
-			chatLog.SenderFaceURL = lc.FaceURL
-			chatLog.SenderNickname = lc.ShowName
-		}
-	}
+	//if len(self) > 0 {
+	//	userInfo, err := c.db.GetLoginUser(ctx, c.loginUserID)
+	//	if err == nil {
+	//		for _, chatLog := range self {
+	//			chatLog.SenderFaceURL = userInfo.FaceURL
+	//			chatLog.SenderNickname = userInfo.Nickname
+	//		}
+	//	}
+	//}
+	//
+	//if lc.FaceURL != "" && lc.ShowName != "" {
+	//	for _, chatLog := range others {
+	//		chatLog.SenderFaceURL = lc.FaceURL
+	//		chatLog.SenderNickname = lc.ShowName
+	//	}
+	//}
 }
 
 // groupHandle processes chat logs for group chat conversations.
@@ -585,32 +585,33 @@ func (c *Conversation) singleHandle(ctx context.Context, self, others []*model_s
 // using the group members' information. If group member information is not available,
 // it attempts to retrieve the sender's information from a local cache.
 func (c *Conversation) groupHandle(ctx context.Context, self, others []*model_struct.LocalChatLog, lc *model_struct.LocalConversation) {
-	allMessage := append(self, others...)
-
-	allSenders := datautil.Slice(allMessage, func(e *model_struct.LocalChatLog) string {
-		return e.SendID
-	})
-	groupMap, err := c.group.GetGroupMemberNameAndFaceURL(ctx, lc.GroupID, datautil.Distinct(allSenders))
-	if err != nil {
-		log.ZError(ctx, "get group member info err", err)
-		return
-	}
-	for _, chatLog := range allMessage {
-		if g, ok := groupMap[chatLog.SendID]; ok { // If group member info is successfully retrieved
-			log.ZDebug(ctx, "find in GetGroupMemberNameAndFaceURL", "sendID", chatLog.SendID, "faceURL", g.FaceURL, "nickName", g.Nickname)
-			if g.FaceURL != "" && g.Nickname != "" {
-				chatLog.SenderFaceURL = g.FaceURL
-				chatLog.SenderNickname = g.Nickname
-			}
-		} else { // Otherwise, retrieve from local temporary cache
-			faceURL, name, err := c.getUserNameAndFaceURL(ctx, chatLog.SendID)
-			if err != nil {
-				log.ZWarn(ctx, "getUserNameAndFaceURL error", err, "senderID", chatLog.SendID)
-			} else if faceURL != "" && name != "" {
-				log.ZDebug(ctx, "find in getUserNameAndFaceURL", "sendID", chatLog.SendID, "faceURL", faceURL, "nickName", name)
-				chatLog.SenderFaceURL = faceURL
-				chatLog.SenderNickname = name
-			}
-		}
-	}
+	return
+	//allMessage := append(self, others...)
+	//
+	//allSenders := datautil.Slice(allMessage, func(e *model_struct.LocalChatLog) string {
+	//	return e.SendID
+	//})
+	//groupMap, err := c.group.GetGroupMemberNameAndFaceURL(ctx, lc.GroupID, datautil.Distinct(allSenders))
+	//if err != nil {
+	//	log.ZError(ctx, "get group member info err", err)
+	//	return
+	//}
+	//for _, chatLog := range allMessage {
+	//	if g, ok := groupMap[chatLog.SendID]; ok { // If group member info is successfully retrieved
+	//		log.ZDebug(ctx, "find in GetGroupMemberNameAndFaceURL", "sendID", chatLog.SendID, "faceURL", g.FaceURL, "nickName", g.Nickname)
+	//		if g.FaceURL != "" && g.Nickname != "" {
+	//			chatLog.SenderFaceURL = g.FaceURL
+	//			chatLog.SenderNickname = g.Nickname
+	//		}
+	//	} else { // Otherwise, retrieve from local temporary cache
+	//		faceURL, name, err := c.getUserNameAndFaceURL(ctx, chatLog.SendID)
+	//		if err != nil {
+	//			log.ZWarn(ctx, "getUserNameAndFaceURL error", err, "senderID", chatLog.SendID)
+	//		} else if faceURL != "" && name != "" {
+	//			log.ZDebug(ctx, "find in getUserNameAndFaceURL", "sendID", chatLog.SendID, "faceURL", faceURL, "nickName", name)
+	//			chatLog.SenderFaceURL = faceURL
+	//			chatLog.SenderNickname = name
+	//		}
+	//	}
+	//}
 }
