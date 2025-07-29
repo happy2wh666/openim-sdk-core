@@ -174,8 +174,6 @@ func (d *DataBase) initDB(ctx context.Context, logLevel int) error {
 
 // 清空本地缓存table的所有数据
 func (d *DataBase) ClearSomeLocalCache(ctx context.Context) error {
-	d.mRWMutex.Lock()
-	defer d.mRWMutex.Unlock()
 	// 使用 Delete 方法清空整个表（不带 Where 条件）
 	log.ZDebug(ctx, "will ClearSomeLocalCache on next step")
 	return d.conn.WithContext(ctx).Session(&gorm.Session{AllowGlobalUpdate: true}).
