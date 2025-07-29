@@ -150,12 +150,12 @@ func (d *DataBase) initDB(ctx context.Context, logLevel int) error {
 	sqlDB.SetMaxIdleConns(2)
 	sqlDB.SetConnMaxIdleTime(time.Minute * 10)
 	d.conn = db
-
+	log.ZDebug(ctx, "will AutoMigrate", dbFileName)
 	// base
 	if err = db.AutoMigrate(&model_struct.LocalAppSDKVersion{}); err != nil {
 		return err
 	}
-
+	log.ZDebug(ctx, "will versionDataMigrate", dbFileName)
 	if err = d.versionDataMigrate(ctx); err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func (d *DataBase) initDB(ctx context.Context, logLevel int) error {
 	//if err := db.Table(constant.SuperGroupTableName).AutoMigrate(superGroup); err != nil {
 	//	return err
 	//}
-
+	log.ZDebug(ctx, "will ClearSomeLocalCache", dbFileName)
 	// 清空 表
 	if err := d.ClearSomeLocalCache(ctx); err != nil {
 		log.ZError(ctx, "Failed to clear some table", err)
