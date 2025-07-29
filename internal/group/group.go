@@ -178,20 +178,20 @@ func (g *Group) initSyncer() {
 				g.listener().OnGroupMemberDeleted(utils.StructToJsonString(local))
 			case syncer.Update:
 				g.listener().OnGroupMemberInfoChanged(utils.StructToJsonString(server))
-				if server.Nickname != local.Nickname || server.FaceURL != local.FaceURL {
-					_ = common.TriggerCmdUpdateMessage(ctx,
-						common.UpdateMessageNode{
-							Action: constant.UpdateMsgFaceUrlAndNickName,
-							Args: common.UpdateMessageInfo{
-								SessionType: constant.ReadGroupChatType, UserID: server.UserID, FaceURL: server.FaceURL,
-								Nickname: server.Nickname, GroupID: server.GroupID,
-							},
-						}, g.conversationCh)
-					_ = common.TriggerCmdUpdateConversation(ctx, common.UpdateConNode{Action: constant.UpdateLatestMessageFaceUrlAndNickName, Args: common.UpdateMessageInfo{
-						SessionType: constant.ReadGroupChatType, UserID: server.UserID, FaceURL: server.FaceURL,
-						Nickname: server.Nickname, GroupID: server.GroupID,
-					}}, g.conversationCh)
-				}
+				//if server.Nickname != local.Nickname || server.FaceURL != local.FaceURL {
+				//	_ = common.TriggerCmdUpdateMessage(ctx,
+				//		common.UpdateMessageNode{
+				//			Action: constant.UpdateMsgFaceUrlAndNickName,
+				//			Args: common.UpdateMessageInfo{
+				//				SessionType: constant.ReadGroupChatType, UserID: server.UserID, FaceURL: server.FaceURL,
+				//				Nickname: server.Nickname, GroupID: server.GroupID,
+				//			},
+				//		}, g.conversationCh)
+				//	_ = common.TriggerCmdUpdateConversation(ctx, common.UpdateConNode{Action: constant.UpdateLatestMessageFaceUrlAndNickName, Args: common.UpdateMessageInfo{
+				//		SessionType: constant.ReadGroupChatType, UserID: server.UserID, FaceURL: server.FaceURL,
+				//		Nickname: server.Nickname, GroupID: server.GroupID,
+				//	}}, g.conversationCh)
+				//}
 			}
 			return nil
 		}),
