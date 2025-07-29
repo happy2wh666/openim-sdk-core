@@ -164,7 +164,26 @@ func (d *DataBase) initDB(ctx context.Context, logLevel int) error {
 	//	return err
 	//}
 
+	// 清空 表
+	if err := d.ClearSomeLocalCache(ctx); err != nil {
+		log.ZError(ctx, "Failed to clear some table", err)
+		return err
+	}
 	return nil
+}
+
+// 清空本地缓存table的所有数据
+func (d *DataBase) ClearSomeLocalCache(ctx context.Context) error {
+	d.mRWMutex.Lock()
+	defer d.mRWMutex.Unlock()
+	// 使用 Delete 方法清空整个表（不带 Where 条件）
+	return d.conn.WithContext(ctx).Session(&gorm.Session{AllowGlobalUpdate: true}).
+		Delete(
+			&model_struct.LocalFriend{},
+			&model_struct.LocalGroup{},
+			&model_struct.LocalGroupMember{},
+			&model_struct.LocalUser{},
+			&model_struct.LocalConversation{}).Error
 }
 
 func (d *DataBase) versionDataMigrate(ctx context.Context) error {
