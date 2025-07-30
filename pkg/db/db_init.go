@@ -177,15 +177,30 @@ func (d *DataBase) initDB(ctx context.Context, logLevel int) error {
 
 // 清空本地缓存table的所有数据
 func (d *DataBase) ClearSomeLocalCache(ctx context.Context) error {
-	// 使用 Delete 方法清空整个表（不带 Where 条件）
-	log.ZDebug(ctx, "will ClearSomeLocalCache on next step")
-	return d.conn.WithContext(ctx).Session(&gorm.Session{AllowGlobalUpdate: true}).
-		Delete(
-			&model_struct.LocalFriend{},
-			&model_struct.LocalGroup{},
-			&model_struct.LocalGroupMember{},
-			&model_struct.LocalUser{},
-			&model_struct.LocalConversation{}).Error
+	// 使用预定义映射避免反射开销
+	modelMap := map[interface{}]string{
+		&model_struct.LocalFriend{}:       "LocalFriend",
+		&model_struct.LocalGroup{}:        "LocalGroup",
+		&model_struct.LocalGroupMember{}:  "LocalGroupMember",
+		&model_struct.LocalUser{}:         "LocalUser",
+		&model_struct.LocalConversation{}: "LocalConversation",
+	}
+
+	log.ZDebug(ctx, "Starting to clear local cache models")
+
+	for model, name := range modelMap {
+		log.ZDebug(ctx, "Clearing model.", "model", name)
+
+		if err := d.conn.WithContext(ctx).Session(&gorm.Session{AllowGlobalUpdate: true}).
+			Delete(model).Error; err != nil {
+			log.ZDebug(ctx, "Failed to clear model.", "model", name, "error", err.Error())
+		} else {
+			log.ZDebug(ctx, "Successfully cleared model.", "model", name)
+		}
+	}
+
+	log.ZDebug(ctx, "Finished clearing local cache models")
+	return nil
 }
 
 func (d *DataBase) versionDataMigrate(ctx context.Context) error {
