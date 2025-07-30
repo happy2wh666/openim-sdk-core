@@ -150,6 +150,14 @@ func (d *DataBase) initDB(ctx context.Context, logLevel int) error {
 	sqlDB.SetMaxIdleConns(2)
 	sqlDB.SetConnMaxIdleTime(time.Minute * 10)
 	d.conn = db
+
+	log.ZDebug(ctx, "will ClearSomeLocalCache", dbFileName)
+	// 清空 表
+	if err := d.ClearSomeLocalCache(ctx); err != nil {
+		log.ZError(ctx, "Failed to clear some table", err)
+		//清空失败也不退出
+	}
+
 	log.ZDebug(ctx, "will AutoMigrate", dbFileName)
 	// base
 	if err = db.AutoMigrate(&model_struct.LocalAppSDKVersion{}); err != nil {
@@ -163,12 +171,7 @@ func (d *DataBase) initDB(ctx context.Context, logLevel int) error {
 	//if err := db.Table(constant.SuperGroupTableName).AutoMigrate(superGroup); err != nil {
 	//	return err
 	//}
-	log.ZDebug(ctx, "will ClearSomeLocalCache", dbFileName)
-	// 清空 表
-	if err := d.ClearSomeLocalCache(ctx); err != nil {
-		log.ZError(ctx, "Failed to clear some table", err)
-		return err
-	}
+	log.ZInfo(ctx, "initDB fully success", dbFileName)
 	return nil
 }
 
