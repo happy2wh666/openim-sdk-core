@@ -36,6 +36,27 @@ const (
 	batchSize = 200
 )
 
+func (d *DataBase) UpdateConversationShowNameByGroupID(ctx context.Context, groupID string, conversationName string) error {
+	d.mRWMutex.Lock()
+	defer d.mRWMutex.Unlock()
+	return d.UpdateConversationShowNameByGroupIDWithoutLock(ctx, groupID, conversationName)
+}
+
+// 内部无锁方法：实际执行更新操作（供其他加锁方法调用）
+func (d *DataBase) UpdateConversationShowNameByGroupIDWithoutLock(ctx context.Context, groupID string, conversationName string) error {
+	var conversation model_struct.LocalConversation
+	err := errs.WrapMsg(d.conn.WithContext(ctx).Where("group_id=?", groupID).Find(&conversation).Error, "GetConversationByGroupID error")
+	if err != nil {
+		log.ZDebug(ctx, "DDD-GetConversationByGroupID error", "groupId", groupID)
+	} else {
+		conversation.ShowName = conversationName
+		err := d.conn.WithContext(ctx).Updates(conversation)
+		if err != nil {
+			return errs.WrapMsg(err.Error, "DDD-UpdateConversationShowNameByGroupIDWithoutLock failed", "groupId", groupID, "showName", conversationName)
+		}
+	}
+	return nil
+}
 func (d *DataBase) GetConversationByUserID(ctx context.Context, userID string) (*model_struct.LocalConversation, error) {
 	d.mRWMutex.RLock()
 	defer d.mRWMutex.RUnlock()

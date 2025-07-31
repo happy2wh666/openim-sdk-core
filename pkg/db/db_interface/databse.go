@@ -84,6 +84,8 @@ type MessageModel interface {
 }
 
 type ConversationModel interface {
+	UpdateConversationShowNameByGroupID(ctx context.Context, groupID string, conversationName string) error
+	UpdateConversationShowNameByGroupIDWithoutLock(ctx context.Context, groupID string, conversationName string) error
 	GetConversationByUserID(ctx context.Context, userID string) (*model_struct.LocalConversation, error)
 	GetAllConversationListDB(ctx context.Context) ([]*model_struct.LocalConversation, error)
 	FindAllUnreadConversationConversationID(ctx context.Context) ([]string, error)
