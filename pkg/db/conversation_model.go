@@ -132,7 +132,7 @@ func (d *DataBase) GetConversationListSplitDB(ctx context.Context, offset, count
 		Find(&conversationList).Error; err != nil {
 		return nil, errs.Wrap(err)
 	}
-
+	log.ZDebug(ctx, "GetConversationListSplitDB", "conv.length=", len(conversationList))
 	// 收集所有需要查询的GroupID
 	groupIDs := make([]string, 0)
 	for _, conv := range conversationList {
@@ -140,6 +140,7 @@ func (d *DataBase) GetConversationListSplitDB(ctx context.Context, offset, count
 			groupIDs = append(groupIDs, conv.GroupID)
 		}
 	}
+	log.ZDebug(ctx, "GetConversationListSplitDB", "needFix.length=", len(groupIDs))
 
 	// 如果没有群组ID，直接返回
 	if len(groupIDs) == 0 {
@@ -164,9 +165,10 @@ func (d *DataBase) GetConversationListSplitDB(ctx context.Context, offset, count
 	for _, conv := range conversationList {
 		if name, ok := groupNameMap[conv.GroupID]; ok {
 			conv.ShowName = name
+			log.ZDebug(ctx, "GetConversationListSplitDB", "update showName", conv.GroupID, name)
 		}
 	}
-
+	log.ZDebug(ctx, "GetConversationListSplitDB", "will return")
 	return conversationList, nil
 }
 
