@@ -179,12 +179,10 @@ func (d *DataBase) initDB(ctx context.Context, logLevel int) error {
 func (d *DataBase) ClearSomeLocalCache(ctx context.Context) error {
 	// 使用预定义映射避免反射开销
 	modelMap := map[interface{}]string{
-		&model_struct.LocalFriend{}:       "LocalFriend",
-		&model_struct.LocalGroup{}:        "LocalGroup",
-		&model_struct.LocalGroupMember{}:  "LocalGroupMember",
-		&model_struct.LocalUser{}:         "LocalUser",
-		&model_struct.LocalVersionSync{}:  "LocalVersionSync",
-		&model_struct.LocalConversation{}: "LocalConversation",
+		&model_struct.LocalFriend{}:      "LocalFriend",
+		&model_struct.LocalGroup{}:       "LocalGroup",
+		&model_struct.LocalGroupMember{}: "LocalGroupMember",
+		&model_struct.LocalUser{}:        "LocalUser",
 	}
 
 	log.ZDebug(ctx, "Starting to clear local cache models")
