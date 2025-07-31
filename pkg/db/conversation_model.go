@@ -121,9 +121,53 @@ func (d *DataBase) GetAllSingleConversationIDList(ctx context.Context) (result [
 func (d *DataBase) GetConversationListSplitDB(ctx context.Context, offset, count int) ([]*model_struct.LocalConversation, error) {
 	d.mRWMutex.RLock()
 	defer d.mRWMutex.RUnlock()
+
 	var conversationList []*model_struct.LocalConversation
-	//return conversationList, errs.Wrap(d.conn.WithContext(ctx).Where("latest_msg_send_time > ?", 0).Order("case when is_pinned=1 then 0 else 1 end,max(latest_msg_send_time,draft_text_time) DESC").Offset(offset).Limit(count).Find(&conversationList).Error)
-	return conversationList, errs.Wrap(d.conn.WithContext(ctx).Order("case when is_pinned=1 then 0 else 1 end,max(latest_msg_send_time,draft_text_time) DESC").Offset(offset).Limit(count).Find(&conversationList).Error)
+	// 查询对话列表
+	if err := d.conn.WithContext(ctx).
+		Where("latest_msg_send_time > ?", 0).
+		Order("case when is_pinned=1 then 0 else 1 end, max(latest_msg_send_time,draft_text_time) DESC").
+		Offset(offset).
+		Limit(count).
+		Find(&conversationList).Error; err != nil {
+		return nil, errs.Wrap(err)
+	}
+
+	// 收集所有需要查询的GroupID
+	groupIDs := make([]string, 0)
+	for _, conv := range conversationList {
+		if conv.GroupID != "" { // 只处理有群组ID的对话
+			groupIDs = append(groupIDs, conv.GroupID)
+		}
+	}
+
+	// 如果没有群组ID，直接返回
+	if len(groupIDs) == 0 {
+		return conversationList, nil
+	}
+
+	// 查询所有相关的群组信息
+	var groups []*model_struct.LocalGroup
+	if err := d.conn.WithContext(ctx).
+		Where("group_id IN (?)", groupIDs).
+		Find(&groups).Error; err != nil {
+		return nil, errs.Wrap(err)
+	}
+
+	// 构建GroupID到GroupName的映射
+	groupNameMap := make(map[string]string)
+	for _, group := range groups {
+		groupNameMap[group.GroupID] = group.GroupName
+	}
+
+	// 遍历对话列表，更新ShowName
+	for _, conv := range conversationList {
+		if name, ok := groupNameMap[conv.GroupID]; ok {
+			conv.ShowName = name
+		}
+	}
+
+	return conversationList, nil
 }
 
 func (d *DataBase) BatchInsertConversationList(ctx context.Context, conversationList []*model_struct.LocalConversation) error {
