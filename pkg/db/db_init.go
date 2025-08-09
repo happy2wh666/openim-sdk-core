@@ -183,6 +183,7 @@ func (d *DataBase) ClearSomeLocalCache(ctx context.Context) error {
 		&model_struct.LocalGroup{}:       "LocalGroup",
 		&model_struct.LocalGroupMember{}: "LocalGroupMember",
 		&model_struct.LocalUser{}:        "LocalUser",
+		&model_struct.LocalVersionSync{}: "LocalVersionSync",
 	}
 
 	log.ZDebug(ctx, "Starting to clear local cache models")
