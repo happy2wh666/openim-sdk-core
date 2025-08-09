@@ -203,13 +203,13 @@ func (c *Conversation) checkID(ctx context.Context, s *sdk_struct.MsgStruct,
 		lc.GroupID = groupID
 		gm, err := c.db.GetGroupMemberInfoByGroupIDUserID(ctx, groupID, c.loginUserID)
 		if err == nil && gm != nil {
-			log.ZDebug(ctx, "QQQQQQQQQQQQQQQQQQQ", "GetGroupMemberInfoByGroupIDUserID", "groupID", groupID, "userID", c.loginUserID)
+			log.ZDebug(ctx, "QQQQQQQQQQQQQQQQQQQ-GetGroupMemberInfoByGroupIDUserID", "groupID", groupID, "userID", c.loginUserID)
 			if gm.Nickname != "" {
 				s.SenderNickname = gm.Nickname
 			}
 		} else { //Maybe the group member information hasn't been pulled locally yet.
 			gm, err := c.group.GetSpecifiedGroupMembersInfo(ctx, groupID, []string{c.loginUserID})
-			log.ZDebug(ctx, "QQQQQQQQQQQQQQQQQQQ", "GetSpecifiedGroupMembersInfo", "groupID", groupID, "userID", c.loginUserID)
+			log.ZDebug(ctx, "QQQQQQQQQQQQQQQQQQQ-GetSpecifiedGroupMembersInfo", "groupID", groupID, "userID", c.loginUserID)
 			if err == nil && gm != nil {
 				if gm[0].Nickname != "" {
 					s.SenderNickname = gm[0].Nickname
