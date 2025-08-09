@@ -210,6 +210,8 @@ func (c *Conversation) checkID(ctx context.Context, s *sdk_struct.MsgStruct,
 		} else { //Maybe the group member information hasn't been pulled locally yet.
 			gm, err := c.group.GetSpecifiedGroupMembersInfo(ctx, groupID, []string{c.loginUserID})
 			log.ZDebug(ctx, "QQQQQQQQQQQQQQQQQQQ-GetSpecifiedGroupMembersInfo", "groupID", groupID, "userID", c.loginUserID)
+			log.ZDebug(ctx, "QQQQQQQQQQQQQQQQQQQ-GetSpecifiedGroupMembersInfo", "gm.length", len(gm))
+			log.ZDebug(ctx, "QQQQQQQQQQQQQQQQQQQ-GetSpecifiedGroupMembersInfo", "gm", gm)
 			if err == nil && gm != nil {
 				if gm[0].Nickname != "" {
 					s.SenderNickname = gm[0].Nickname
