@@ -3,6 +3,9 @@ package conversation_msg
 import (
 	"context"
 	"fmt"
+	"github.com/jinzhu/copier"
+	"github.com/openimsdk/openim-sdk-core/v3/internal/third/file"
+	"github.com/openimsdk/openim-sdk-core/v3/pkg/content_type"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -13,11 +16,9 @@ import (
 
 	"github.com/openimsdk/tools/errs"
 
-	"github.com/openimsdk/openim-sdk-core/v3/internal/third/file"
 	"github.com/openimsdk/openim-sdk-core/v3/open_im_sdk_callback"
 	"github.com/openimsdk/openim-sdk-core/v3/pkg/common"
 	"github.com/openimsdk/openim-sdk-core/v3/pkg/constant"
-	"github.com/openimsdk/openim-sdk-core/v3/pkg/content_type"
 	"github.com/openimsdk/openim-sdk-core/v3/pkg/db/model_struct"
 	"github.com/openimsdk/openim-sdk-core/v3/pkg/sdk_params_callback"
 	"github.com/openimsdk/openim-sdk-core/v3/pkg/sdkerrs"
@@ -29,8 +30,6 @@ import (
 
 	pbConversation "github.com/openimsdk/protocol/conversation"
 	"github.com/openimsdk/protocol/sdkws"
-
-	"github.com/jinzhu/copier"
 )
 
 func (c *Conversation) GetAllConversationList(ctx context.Context) ([]*model_struct.LocalConversation, error) {
@@ -317,6 +316,14 @@ func (c *Conversation) GetConversationIDBySessionType(_ context.Context, sourceI
 }
 
 func (c *Conversation) SendMessage(ctx context.Context, s *sdk_struct.MsgStruct, recvID, groupID string, p *sdkws.OfflinePushInfo, isOnlineOnly bool) (*sdk_struct.MsgStruct, error) {
+	log.ZDebug(ctx, "ZZWWZZWWZZ 开始处理消息发送",
+		"clientMsgID", s.ClientMsgID,
+		"contentType", s.ContentType,
+		"recvID", recvID,
+		"groupID", groupID,
+		"isOnlineOnly", isOnlineOnly)
+
+	// 定义文件路径处理函数
 	filepathExt := func(name ...string) string {
 		for _, path := range name {
 			if ext := filepath.Ext(path); ext != "" {
@@ -326,54 +333,112 @@ func (c *Conversation) SendMessage(ctx context.Context, s *sdk_struct.MsgStruct,
 		return ""
 	}
 	options := make(map[string]bool, 2)
+
+	// 检查ID合法性并获取会话信息
+	log.ZDebug(ctx, "ZZWWZZWWZZ 开始检查消息接收者ID合法性",
+		"clientMsgID", s.ClientMsgID)
 	lc, err := c.checkID(ctx, s, recvID, groupID, options)
 	if err != nil {
+		log.ZError(ctx, "ZZWWZZWWZZ 检查ID合法性失败", err,
+			"clientMsgID", s.ClientMsgID,
+			"recvID", recvID,
+			"groupID", groupID)
 		return nil, err
 	}
+	log.ZDebug(ctx, "ZZWWZZWWZZ ID合法性检查通过，获取会话信息",
+		"clientMsgID", s.ClientMsgID,
+		"conversationID", lc.ConversationID,
+		"conversationType", lc.ConversationType)
+
+	// 获取发送回调
 	callback, _ := ctx.Value("callback").(open_im_sdk_callback.SendMsgCallBack)
-	log.ZDebug(ctx, "before insert message is", "message", *s)
+	log.ZDebug(ctx, "ZZWWZZWWZZ 准备处理本地消息存储",
+		"clientMsgID", s.ClientMsgID,
+		"isOnlineOnly", isOnlineOnly)
+
+	// 处理本地消息存储
 	if !isOnlineOnly {
 		oldMessage, err := c.db.GetMessage(ctx, lc.ConversationID, s.ClientMsgID)
 		if err != nil {
+			log.ZDebug(ctx, "ZZWWZZWWZZ 本地不存在该消息，准备插入新消息",
+				"clientMsgID", s.ClientMsgID,
+				"conversationID", lc.ConversationID)
 			localMessage := MsgStructToLocalChatLog(s)
 			err := c.db.InsertMessage(ctx, lc.ConversationID, localMessage)
 			if err != nil {
+				log.ZError(ctx, "ZZWWZZWWZZ 插入消息到本地数据库失败", err,
+					"clientMsgID", s.ClientMsgID,
+					"conversationID", lc.ConversationID)
 				return nil, err
 			}
+			log.ZDebug(ctx, "ZZWWZZWWZZ 消息成功插入本地数据库",
+				"clientMsgID", s.ClientMsgID,
+				"conversationID", lc.ConversationID)
+
 			err = c.db.InsertSendingMessage(ctx, &model_struct.LocalSendingMessages{
 				ConversationID: lc.ConversationID,
 				ClientMsgID:    localMessage.ClientMsgID,
 			})
 			if err != nil {
+				log.ZError(ctx, "ZZWWZZWWZZ 插入发送中消息记录失败", err,
+					"clientMsgID", s.ClientMsgID,
+					"conversationID", lc.ConversationID)
 				return nil, err
 			}
+			log.ZDebug(ctx, "ZZWWZZWWZZ 发送中消息记录插入成功",
+				"clientMsgID", s.ClientMsgID)
 		} else {
 			if oldMessage.Status != constant.MsgStatusSendFailed {
+				log.ZDebug(ctx, "ZZWWZZWWZZ 消息已存在且状态不为发送失败，拒绝重复发送",
+					"clientMsgID", s.ClientMsgID,
+					"currentStatus", oldMessage.Status)
 				return nil, sdkerrs.ErrMsgRepeated
 			} else {
+				log.ZDebug(ctx, "ZZWWZZWWZZ 消息存在但状态为发送失败，重新发送",
+					"clientMsgID", s.ClientMsgID)
 				s.Status = constant.MsgStatusSending
 				err = c.db.InsertSendingMessage(ctx, &model_struct.LocalSendingMessages{
 					ConversationID: lc.ConversationID,
 					ClientMsgID:    s.ClientMsgID,
 				})
 				if err != nil {
+					log.ZError(ctx, "ZZWWZZWWZZ 重新插入发送中消息记录失败", err,
+						"clientMsgID", s.ClientMsgID)
 					return nil, err
 				}
 			}
 		}
+
+		// 更新会话最新消息
 		lc.LatestMsg = utils.StructToJsonString(s)
-		log.ZDebug(ctx, "send message come here", "conversion", *lc)
-		_ = common.TriggerCmdUpdateConversation(ctx, common.UpdateConNode{ConID: lc.ConversationID, Action: constant.AddConOrUpLatMsg, Args: *lc}, c.GetCh())
+		log.ZDebug(ctx, "ZZWWZZWWZZ 准备触发会话更新",
+			"conversationID", lc.ConversationID,
+			"clientMsgID", s.ClientMsgID)
+		_ = common.TriggerCmdUpdateConversation(ctx, common.UpdateConNode{
+			ConID:  lc.ConversationID,
+			Action: constant.AddConOrUpLatMsg,
+			Args:   *lc,
+		}, c.GetCh())
 	}
 
 	var delFile []string
-	//media file handle
+	// 处理媒体文件
+	log.ZDebug(ctx, "ZZWWZZWWZZ 开始处理媒体文件",
+		"clientMsgID", s.ClientMsgID,
+		"contentType", s.ContentType)
 	switch s.ContentType {
 	case constant.Picture:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理图片消息",
+			"clientMsgID", s.ClientMsgID,
+			"sourcePath", s.PictureElem.SourcePath)
 		if s.Status == constant.MsgStatusSendSuccess {
 			s.Content = utils.StructToJsonString(s.PictureElem)
+			log.ZDebug(ctx, "ZZWWZZWWZZ 图片消息状态为已发送，跳过上传",
+				"clientMsgID", s.ClientMsgID)
 			break
 		}
+
+		// 处理图片路径
 		var sourcePath string
 		if utils.FileExist(s.PictureElem.SourcePath) {
 			sourcePath = s.PictureElem.SourcePath
@@ -382,8 +447,11 @@ func (c *Conversation) SendMessage(ctx context.Context, s *sdk_struct.MsgStruct,
 			sourcePath = utils.FileTmpPath(s.PictureElem.SourcePath, c.DataDir)
 			delFile = append(delFile, sourcePath)
 		}
-		log.ZDebug(ctx, "send picture", "path", sourcePath)
+		log.ZDebug(ctx, "ZZWWZZWWZZ 确定图片上传路径",
+			"sourcePath", sourcePath,
+			"tempFilesToDelete", delFile)
 
+		// 上传图片
 		res, err := c.file.UploadFile(ctx, &file.UploadFileReq{
 			ContentType: s.PictureElem.SourcePicture.Type,
 			Filepath:    sourcePath,
@@ -392,9 +460,17 @@ func (c *Conversation) SendMessage(ctx context.Context, s *sdk_struct.MsgStruct,
 			Cause:       "msg-picture",
 		}, NewUploadFileCallback(ctx, callback.OnProgress, s, lc.ConversationID, c.db))
 		if err != nil {
+			log.ZError(ctx, "ZZWWZZWWZZ 图片上传失败", err,
+				"clientMsgID", s.ClientMsgID,
+				"sourcePath", sourcePath)
 			c.updateMsgStatusAndTriggerConversation(ctx, s.ClientMsgID, "", s.CreateTime, constant.MsgStatusSendFailed, s, lc, isOnlineOnly)
 			return nil, err
 		}
+		log.ZDebug(ctx, "ZZWWZZWWZZ 图片上传成功",
+			"clientMsgID", s.ClientMsgID,
+			"url", res.URL)
+
+		// 处理图片URL和缩略图
 		s.PictureElem.SourcePicture.Url = res.URL
 		s.PictureElem.BigPicture = s.PictureElem.SourcePicture
 		u, err := url.Parse(res.URL)
@@ -409,16 +485,29 @@ func (c *Conversation) SendMessage(ctx context.Context, s *sdk_struct.MsgStruct,
 				Height: 640,
 				Url:    u.String(),
 			}
+			log.ZDebug(ctx, "ZZWWZZWWZZ 生成图片缩略图URL",
+				"clientMsgID", s.ClientMsgID,
+				"snapshotUrl", u.String())
 		} else {
-			log.ZError(ctx, "parse url failed", err, "url", res.URL, "err", err)
+			log.ZError(ctx, "ZZWWZZWWZZ 解析图片URL失败，使用原图URL作为缩略图", err,
+				"clientMsgID", s.ClientMsgID,
+				"url", res.URL)
 			s.PictureElem.SnapshotPicture = s.PictureElem.SourcePicture
 		}
 		s.Content = utils.StructToJsonString(s.PictureElem)
+
 	case constant.Sound:
+		// 音频消息处理（与图片逻辑类似，省略重复注释）
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理音频消息",
+			"clientMsgID", s.ClientMsgID,
+			"soundPath", s.SoundElem.SoundPath)
 		if s.Status == constant.MsgStatusSendSuccess {
 			s.Content = utils.StructToJsonString(s.SoundElem)
+			log.ZDebug(ctx, "ZZWWZZWWZZ 音频消息状态为已发送，跳过上传",
+				"clientMsgID", s.ClientMsgID)
 			break
 		}
+
 		var sourcePath string
 		if utils.FileExist(s.SoundElem.SoundPath) {
 			sourcePath = s.SoundElem.SoundPath
@@ -427,7 +516,9 @@ func (c *Conversation) SendMessage(ctx context.Context, s *sdk_struct.MsgStruct,
 			sourcePath = utils.FileTmpPath(s.SoundElem.SoundPath, c.DataDir)
 			delFile = append(delFile, sourcePath)
 		}
-		// log.Info("", "file", sourcePath, delFile)
+		log.ZDebug(ctx, "ZZWWZZWWZZ 确定音频上传路径",
+			"sourcePath", sourcePath,
+			"tempFilesToDelete", delFile)
 
 		res, err := c.file.UploadFile(ctx, &file.UploadFileReq{
 			ContentType: s.SoundElem.SoundType,
@@ -437,18 +528,32 @@ func (c *Conversation) SendMessage(ctx context.Context, s *sdk_struct.MsgStruct,
 			Cause:       "msg-voice",
 		}, NewUploadFileCallback(ctx, callback.OnProgress, s, lc.ConversationID, c.db))
 		if err != nil {
+			log.ZError(ctx, "ZZWWZZWWZZ 音频上传失败", err,
+				"clientMsgID", s.ClientMsgID,
+				"sourcePath", sourcePath)
 			c.updateMsgStatusAndTriggerConversation(ctx, s.ClientMsgID, "", s.CreateTime, constant.MsgStatusSendFailed, s, lc, isOnlineOnly)
 			return nil, err
 		}
+		log.ZDebug(ctx, "ZZWWZZWWZZ 音频上传成功",
+			"clientMsgID", s.ClientMsgID,
+			"url", res.URL)
 		s.SoundElem.SourceURL = res.URL
 		s.Content = utils.StructToJsonString(s.SoundElem)
+
 	case constant.Video:
+		// 视频消息处理（包含视频和缩略图并行上传）
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理视频消息",
+			"clientMsgID", s.ClientMsgID,
+			"videoPath", s.VideoElem.VideoPath,
+			"snapshotPath", s.VideoElem.SnapshotPath)
 		if s.Status == constant.MsgStatusSendSuccess {
 			s.Content = utils.StructToJsonString(s.VideoElem)
+			log.ZDebug(ctx, "ZZWWZZWWZZ 视频消息状态为已发送，跳过上传",
+				"clientMsgID", s.ClientMsgID)
 			break
 		}
-		var videoPath string
-		var snapPath string
+
+		var videoPath, snapPath string
 		if utils.FileExist(s.VideoElem.VideoPath) {
 			videoPath = s.VideoElem.VideoPath
 			snapPath = s.VideoElem.SnapshotPath
@@ -457,16 +562,23 @@ func (c *Conversation) SendMessage(ctx context.Context, s *sdk_struct.MsgStruct,
 		} else {
 			videoPath = utils.FileTmpPath(s.VideoElem.VideoPath, c.DataDir)
 			snapPath = utils.FileTmpPath(s.VideoElem.SnapshotPath, c.DataDir)
-			delFile = append(delFile, videoPath)
-			delFile = append(delFile, snapPath)
+			delFile = append(delFile, videoPath, snapPath)
 		}
-		log.ZDebug(ctx, "file", "videoPath", videoPath, "snapPath", snapPath, "delFile", delFile)
+		log.ZDebug(ctx, "ZZWWZZWWZZ 确定视频上传路径",
+			"videoPath", videoPath,
+			"snapPath", snapPath,
+			"tempFilesToDelete", delFile)
 
 		var wg sync.WaitGroup
 		wg.Add(2)
 		var putErrs error
+
+		// 上传视频缩略图
 		go func() {
 			defer wg.Done()
+			log.ZDebug(ctx, "ZZWWZZWWZZ 开始上传视频缩略图",
+				"clientMsgID", s.ClientMsgID,
+				"snapPath", snapPath)
 			snapRes, err := c.file.UploadFile(ctx, &file.UploadFileReq{
 				ContentType: s.VideoElem.SnapshotType,
 				Filepath:    snapPath,
@@ -475,14 +587,23 @@ func (c *Conversation) SendMessage(ctx context.Context, s *sdk_struct.MsgStruct,
 				Cause:       "msg-video-snapshot",
 			}, nil)
 			if err != nil {
-				log.ZWarn(ctx, "upload video snapshot failed", err)
+				log.ZError(ctx, "ZZWWZZWWZZ 视频缩略图上传失败", err,
+					"clientMsgID", s.ClientMsgID,
+					"snapPath", snapPath)
 				return
 			}
 			s.VideoElem.SnapshotURL = snapRes.URL
+			log.ZDebug(ctx, "ZZWWZZWWZZ 视频缩略图上传成功",
+				"clientMsgID", s.ClientMsgID,
+				"snapshotUrl", snapRes.URL)
 		}()
 
+		// 上传视频文件
 		go func() {
 			defer wg.Done()
+			log.ZDebug(ctx, "ZZWWZZWWZZ 开始上传视频文件",
+				"clientMsgID", s.ClientMsgID,
+				"videoPath", videoPath)
 			res, err := c.file.UploadFile(ctx, &file.UploadFileReq{
 				ContentType: content_type.GetType(s.VideoElem.VideoType, filepath.Ext(s.VideoElem.VideoPath)),
 				Filepath:    videoPath,
@@ -491,26 +612,40 @@ func (c *Conversation) SendMessage(ctx context.Context, s *sdk_struct.MsgStruct,
 				Cause:       "msg-video",
 			}, NewUploadFileCallback(ctx, callback.OnProgress, s, lc.ConversationID, c.db))
 			if err != nil {
+				log.ZError(ctx, "ZZWWZZWWZZ 视频文件上传失败", err,
+					"clientMsgID", s.ClientMsgID,
+					"videoPath", videoPath)
 				c.updateMsgStatusAndTriggerConversation(ctx, s.ClientMsgID, "", s.CreateTime, constant.MsgStatusSendFailed, s, lc, isOnlineOnly)
 				putErrs = err
 				return
 			}
 			if res != nil {
 				s.VideoElem.VideoURL = res.URL
+				log.ZDebug(ctx, "ZZWWZZWWZZ 视频文件上传成功",
+					"clientMsgID", s.ClientMsgID,
+					"videoUrl", res.URL)
 			}
 		}()
+
 		wg.Wait()
 		if err := putErrs; err != nil {
 			return nil, err
 		}
 		s.Content = utils.StructToJsonString(s.VideoElem)
+
 	case constant.File:
+		// 文件消息处理（与图片逻辑类似，省略重复注释）
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理文件消息",
+			"clientMsgID", s.ClientMsgID,
+			"filePath", s.FileElem.FilePath)
 		if s.Status == constant.MsgStatusSendSuccess {
 			s.Content = utils.StructToJsonString(s.FileElem)
+			log.ZDebug(ctx, "ZZWWZZWWZZ 文件消息状态为已发送，跳过上传",
+				"clientMsgID", s.ClientMsgID)
 			break
 		}
-		name := s.FileElem.FileName
 
+		name := s.FileElem.FileName
 		if name == "" {
 			name = s.FileElem.FilePath
 		}
@@ -526,6 +661,10 @@ func (c *Conversation) SendMessage(ctx context.Context, s *sdk_struct.MsgStruct,
 			sourcePath = utils.FileTmpPath(s.FileElem.FilePath, c.DataDir)
 			delFile = append(delFile, sourcePath)
 		}
+		log.ZDebug(ctx, "ZZWWZZWWZZ 确定文件上传路径",
+			"sourcePath", sourcePath,
+			"fileName", name,
+			"tempFilesToDelete", delFile)
 
 		res, err := c.file.UploadFile(ctx, &file.UploadFileReq{
 			ContentType: content_type.GetType(s.FileElem.FileType, filepath.Ext(s.FileElem.FilePath), filepath.Ext(s.FileElem.FileName)),
@@ -535,136 +674,261 @@ func (c *Conversation) SendMessage(ctx context.Context, s *sdk_struct.MsgStruct,
 			Cause:       "msg-file",
 		}, NewUploadFileCallback(ctx, callback.OnProgress, s, lc.ConversationID, c.db))
 		if err != nil {
+			log.ZError(ctx, "ZZWWZZWWZZ 文件上传失败", err,
+				"clientMsgID", s.ClientMsgID,
+				"sourcePath", sourcePath)
 			c.updateMsgStatusAndTriggerConversation(ctx, s.ClientMsgID, "", s.CreateTime, constant.MsgStatusSendFailed, s, lc, isOnlineOnly)
 			return nil, err
 		}
+		log.ZDebug(ctx, "ZZWWZZWWZZ 文件上传成功",
+			"clientMsgID", s.ClientMsgID,
+			"url", res.URL)
 		s.FileElem.SourceURL = res.URL
 		s.Content = utils.StructToJsonString(s.FileElem)
+
+	// 文本及其他类型消息处理
 	case constant.Text:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理文本消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.TextElem)
 	case constant.AtText:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理@文本消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.AtTextElem)
 	case constant.Location:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理位置消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.LocationElem)
 	case constant.Custom:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理自定义消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.CustomElem)
 	case constant.Merger:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理合并消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.MergeElem)
 	case constant.Quote:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理引用消息",
+			"clientMsgID", s.ClientMsgID,
+			"quoteClientMsgID", s.QuoteElem.QuoteMessage.ClientMsgID)
 		quoteMessage, err := c.db.GetMessage(ctx, lc.ConversationID, s.QuoteElem.QuoteMessage.ClientMsgID)
 		if err != nil {
-			log.ZWarn(ctx, "quote message not found", err)
+			log.ZWarn(ctx, "ZZWWZZWWZZ 引用的消息未找到", err,
+				"clientMsgID", s.ClientMsgID,
+				"quoteClientMsgID", s.QuoteElem.QuoteMessage.ClientMsgID)
+		} else {
+			s.QuoteElem.QuoteMessage.Seq = quoteMessage.Seq
 		}
-		s.QuoteElem.QuoteMessage.Seq = quoteMessage.Seq
 		s.Content = utils.StructToJsonString(s.QuoteElem)
 	case constant.Card:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理名片消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.CardElem)
 	case constant.Face:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理表情消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.FaceElem)
 	case constant.AdvancedText:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理高级文本消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.AdvancedTextElem)
 	default:
+		log.ZError(ctx, "ZZWWZZWWZZ 不支持的消息类型", nil,
+			"clientMsgID", s.ClientMsgID,
+			"contentType", s.ContentType)
 		return nil, sdkerrs.ErrMsgContentTypeNotSupport
 	}
+
+	// 更新媒体消息的本地存储
 	if utils.IsContainInt(int(s.ContentType), []int{constant.Picture, constant.Sound, constant.Video, constant.File}) {
 		if !isOnlineOnly {
 			localMessage := MsgStructToLocalChatLog(s)
-			log.ZDebug(ctx, "update message is ", "localMessage", localMessage)
+			log.ZDebug(ctx, "ZZWWZZWWZZ 更新本地媒体消息记录",
+				"clientMsgID", s.ClientMsgID,
+				"conversationID", lc.ConversationID)
 			err = c.db.UpdateMessage(ctx, lc.ConversationID, localMessage)
 			if err != nil {
+				log.ZError(ctx, "ZZWWZZWWZZ 更新本地媒体消息失败", err,
+					"clientMsgID", s.ClientMsgID)
 				return nil, err
 			}
 		}
 	}
 
+	// 调用发送到服务器的方法
+	log.ZDebug(ctx, "ZZWWZZWWZZ 准备将消息发送到服务器",
+		"clientMsgID", s.ClientMsgID)
 	return c.sendMessageToServer(ctx, s, lc, callback, delFile, p, options, isOnlineOnly)
 }
 
 func (c *Conversation) SendMessageNotOss(ctx context.Context, s *sdk_struct.MsgStruct, recvID, groupID string,
 	p *sdkws.OfflinePushInfo, isOnlineOnly bool) (*sdk_struct.MsgStruct, error) {
+	log.ZDebug(ctx, "ZZWWZZWWZZ 开始处理非OSS消息发送",
+		"clientMsgID", s.ClientMsgID,
+		"contentType", s.ContentType,
+		"recvID", recvID,
+		"groupID", groupID,
+		"isOnlineOnly", isOnlineOnly)
+
 	options := make(map[string]bool, 2)
+
+	// 检查ID合法性并获取会话信息
+	log.ZDebug(ctx, "ZZWWZZWWZZ 开始检查消息接收者ID合法性",
+		"clientMsgID", s.ClientMsgID)
 	lc, err := c.checkID(ctx, s, recvID, groupID, options)
 	if err != nil {
+		log.ZError(ctx, "ZZWWZZWWZZ 检查ID合法性失败", err,
+			"clientMsgID", s.ClientMsgID,
+			"recvID", recvID,
+			"groupID", groupID)
 		return nil, err
 	}
+	log.ZDebug(ctx, "ZZWWZZWWZZ ID合法性检查通过，获取会话信息",
+		"clientMsgID", s.ClientMsgID,
+		"conversationID", lc.ConversationID,
+		"conversationType", lc.ConversationType)
+
+	// 获取发送回调
 	callback, _ := ctx.Value("callback").(open_im_sdk_callback.SendMsgCallBack)
+	log.ZDebug(ctx, "ZZWWZZWWZZ 准备处理本地消息存储",
+		"clientMsgID", s.ClientMsgID,
+		"isOnlineOnly", isOnlineOnly)
+
+	// 处理本地消息存储
 	if !isOnlineOnly {
 		oldMessage, err := c.db.GetMessage(ctx, lc.ConversationID, s.ClientMsgID)
 		if err != nil {
+			log.ZDebug(ctx, "ZZWWZZWWZZ 本地不存在该消息，准备插入新消息",
+				"clientMsgID", s.ClientMsgID,
+				"conversationID", lc.ConversationID)
 			localMessage := MsgStructToLocalChatLog(s)
 			err := c.db.InsertMessage(ctx, lc.ConversationID, localMessage)
 			if err != nil {
+				log.ZError(ctx, "ZZWWZZWWZZ 插入消息到本地数据库失败", err,
+					"clientMsgID", s.ClientMsgID,
+					"conversationID", lc.ConversationID)
 				return nil, err
 			}
+			log.ZDebug(ctx, "ZZWWZZWWZZ 消息成功插入本地数据库",
+				"clientMsgID", s.ClientMsgID,
+				"conversationID", lc.ConversationID)
+
 			err = c.db.InsertSendingMessage(ctx, &model_struct.LocalSendingMessages{
 				ConversationID: lc.ConversationID,
 				ClientMsgID:    localMessage.ClientMsgID,
 			})
 			if err != nil {
+				log.ZError(ctx, "ZZWWZZWWZZ 插入发送中消息记录失败", err,
+					"clientMsgID", s.ClientMsgID,
+					"conversationID", lc.ConversationID)
 				return nil, err
 			}
+			log.ZDebug(ctx, "ZZWWZZWWZZ 发送中消息记录插入成功",
+				"clientMsgID", s.ClientMsgID)
 		} else {
 			if oldMessage.Status != constant.MsgStatusSendFailed {
+				log.ZDebug(ctx, "ZZWWZZWWZZ 消息已存在且状态不为发送失败，拒绝重复发送",
+					"clientMsgID", s.ClientMsgID,
+					"currentStatus", oldMessage.Status)
 				return nil, sdkerrs.ErrMsgRepeated
 			} else {
+				log.ZDebug(ctx, "ZZWWZZWWZZ 消息存在但状态为发送失败，重新发送",
+					"clientMsgID", s.ClientMsgID)
 				s.Status = constant.MsgStatusSending
 				err = c.db.InsertSendingMessage(ctx, &model_struct.LocalSendingMessages{
 					ConversationID: lc.ConversationID,
 					ClientMsgID:    s.ClientMsgID,
 				})
 				if err != nil {
+					log.ZError(ctx, "ZZWWZZWWZZ 重新插入发送中消息记录失败", err,
+						"clientMsgID", s.ClientMsgID)
 					return nil, err
 				}
 			}
 		}
 	}
+
+	// 更新会话最新消息
 	lc.LatestMsg = utils.StructToJsonString(s)
+	log.ZDebug(ctx, "ZZWWZZWWZZ 准备处理消息内容",
+		"clientMsgID", s.ClientMsgID,
+		"contentType", s.ContentType)
+
+	// 处理消息内容（无需OSS上传）
 	var delFile []string
 	switch s.ContentType {
 	case constant.Picture:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理非OSS图片消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.PictureElem)
 	case constant.Sound:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理非OSS音频消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.SoundElem)
 	case constant.Video:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理非OSS视频消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.VideoElem)
 	case constant.File:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理非OSS文件消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.FileElem)
 	case constant.Text:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理文本消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.TextElem)
 	case constant.AtText:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理@文本消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.AtTextElem)
 	case constant.Location:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理位置消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.LocationElem)
 	case constant.Custom:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理自定义消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.CustomElem)
 	case constant.Merger:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理合并消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.MergeElem)
 	case constant.Quote:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理引用消息",
+			"clientMsgID", s.ClientMsgID,
+			"quoteClientMsgID", s.QuoteElem.QuoteMessage.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.QuoteElem)
 	case constant.Card:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理名片消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.CardElem)
 	case constant.Face:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理表情消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.FaceElem)
 	case constant.AdvancedText:
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理高级文本消息", "clientMsgID", s.ClientMsgID)
 		s.Content = utils.StructToJsonString(s.AdvancedTextElem)
 	default:
+		log.ZError(ctx, "ZZWWZZWWZZ 不支持的消息类型", nil,
+			"clientMsgID", s.ClientMsgID,
+			"contentType", s.ContentType)
 		return nil, sdkerrs.ErrMsgContentTypeNotSupport
 	}
+
+	// 更新媒体消息的本地存储（如果需要）
 	if utils.IsContainInt(int(s.ContentType), []int{constant.Picture, constant.Sound, constant.Video, constant.File}) {
 		if isOnlineOnly {
 			localMessage := MsgStructToLocalChatLog(s)
+			log.ZDebug(ctx, "ZZWWZZWWZZ 更新本地媒体消息记录",
+				"clientMsgID", s.ClientMsgID,
+				"conversationID", lc.ConversationID)
 			err = c.db.UpdateMessage(ctx, lc.ConversationID, localMessage)
 			if err != nil {
+				log.ZError(ctx, "ZZWWZZWWZZ 更新本地媒体消息失败", err,
+					"clientMsgID", s.ClientMsgID)
 				return nil, err
 			}
 		}
 	}
+
+	// 调用发送到服务器的方法
+	log.ZDebug(ctx, "ZZWWZZWWZZ 准备将非OSS消息发送到服务器",
+		"clientMsgID", s.ClientMsgID)
 	return c.sendMessageToServer(ctx, s, lc, callback, delFile, p, options, isOnlineOnly)
 }
 
 func (c *Conversation) sendMessageToServer(ctx context.Context, s *sdk_struct.MsgStruct, lc *model_struct.LocalConversation, callback open_im_sdk_callback.SendMsgCallBack,
 	delFiles []string, offlinePushInfo *sdkws.OfflinePushInfo, options map[string]bool, isOnlineOnly bool) (*sdk_struct.MsgStruct, error) {
+	log.ZDebug(ctx, "ZZWWZZWWZZ 进入sendMessageToServer方法",
+		"clientMsgID", s.ClientMsgID,
+		"conversationID", lc.ConversationID)
+
+	// 处理在线消息的特殊选项
 	if isOnlineOnly {
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理在线消息选项",
+			"clientMsgID", s.ClientMsgID)
 		utils.SetSwitchFromOptions(options, constant.IsHistory, false)
 		utils.SetSwitchFromOptions(options, constant.IsPersistent, false)
 		utils.SetSwitchFromOptions(options, constant.IsSenderSync, false)
@@ -673,7 +937,10 @@ func (c *Conversation) sendMessageToServer(ctx context.Context, s *sdk_struct.Ms
 		utils.SetSwitchFromOptions(options, constant.IsUnreadCount, false)
 		utils.SetSwitchFromOptions(options, constant.IsOfflinePush, false)
 	}
-	//Protocol conversion
+
+	// 协议转换：本地MsgStruct -> 服务器需要的MsgData
+	log.ZDebug(ctx, "ZZWWZZWWZZ 开始消息协议转换",
+		"clientMsgID", s.ClientMsgID)
 	var wsMsgData sdkws.MsgData
 	copier.Copy(&wsMsgData, s)
 	wsMsgData.AttachedInfo = utils.StructToJsonString(s.AttachedInfoElem)
@@ -685,48 +952,83 @@ func (c *Conversation) sendMessageToServer(ctx context.Context, s *sdk_struct.Ms
 		wsMsgData.AtUserIDList = s.AtTextElem.AtUserList
 	}
 	wsMsgData.OfflinePushInfo = offlinePushInfo
-	s.Content = ""
-	var sendMsgResp sdkws.UserSendMsgResp
+	s.Content = "" // 清空内容，避免重复传输
+	log.ZDebug(ctx, "ZZWWZZWWZZ 消息协议转换完成",
+		"clientMsgID", s.ClientMsgID,
+		"serverMsgType", wsMsgData.ContentType)
 
+	// 发送消息到服务器并等待响应
+	var sendMsgResp sdkws.UserSendMsgResp
+	log.ZDebug(ctx, "ZZWWZZWWZZ 开始通过长连接发送消息到服务器",
+		"clientMsgID", s.ClientMsgID,
+		"cmd", constant.SendMsg)
 	err := c.LongConnMgr.SendReqWaitResp(ctx, &wsMsgData, constant.SendMsg, &sendMsgResp)
 	if err != nil {
-		//if send message network timeout need to double-check message has received by db.
+		log.ZWarn(ctx, "ZZWWZZWWZZ 发送消息到服务器失败", err,
+			"clientMsgID", s.ClientMsgID)
+
+		// 处理网络超时特殊情况
 		if sdkerrs.ErrNetworkTimeOut.Is(err) && !isOnlineOnly {
+			log.ZDebug(ctx, "ZZWWZZWWZZ 检测到网络超时，双重检查本地消息状态",
+				"clientMsgID", s.ClientMsgID)
 			oldMessage, _ := c.db.GetMessage(ctx, lc.ConversationID, s.ClientMsgID)
 			if oldMessage.Status == constant.MsgStatusSendSuccess {
+				log.ZDebug(ctx, "ZZWWZZWWZZ 本地消息状态为已发送，使用本地记录",
+					"clientMsgID", s.ClientMsgID,
+					"serverMsgID", oldMessage.ServerMsgID)
 				sendMsgResp.SendTime = oldMessage.SendTime
 				sendMsgResp.ClientMsgID = oldMessage.ClientMsgID
 				sendMsgResp.ServerMsgID = oldMessage.ServerMsgID
 			} else {
-				log.ZError(ctx, "send msg to server failed", err, "message", s)
+				log.ZError(ctx, "ZZWWZZWWZZ 网络超时且本地消息未发送成功", err,
+					"clientMsgID", s.ClientMsgID)
 				c.updateMsgStatusAndTriggerConversation(ctx, s.ClientMsgID, "", s.CreateTime,
 					constant.MsgStatusSendFailed, s, lc, isOnlineOnly)
 				return s, err
 			}
 		} else {
-			log.ZError(ctx, "send msg to server failed", err, "message", s)
+			// 其他错误情况，标记消息为发送失败
 			c.updateMsgStatusAndTriggerConversation(ctx, s.ClientMsgID, "", s.CreateTime,
 				constant.MsgStatusSendFailed, s, lc, isOnlineOnly)
 			return s, err
 		}
 	}
+
+	// 处理服务器返回的成功响应
+	log.ZDebug(ctx, "ZZWWZZWWZZ 消息成功发送到服务器",
+		"clientMsgID", s.ClientMsgID,
+		"serverMsgID", sendMsgResp.ServerMsgID,
+		"sendTime", sendMsgResp.SendTime)
 	s.SendTime = sendMsgResp.SendTime
 	s.Status = constant.MsgStatusSendSuccess
 	s.ServerMsgID = sendMsgResp.ServerMsgID
+
+	// 异步清理临时文件并更新消息状态
 	go func() {
-		//remove media cache file
+		log.ZDebug(ctx, "ZZWWZZWWZZ 开始异步处理消息发送后操作",
+			"clientMsgID", s.ClientMsgID)
+
+		// 删除临时文件
 		for _, file := range delFiles {
 			err := os.Remove(file)
 			if err != nil {
-				log.ZError(ctx, "delete temp File is failed", err, "filePath", file)
+				log.ZError(ctx, "ZZWWZZWWZZ 删除临时文件失败", err,
+					"filePath", file,
+					"clientMsgID", s.ClientMsgID)
+			} else {
+				log.ZDebug(ctx, "ZZWWZZWWZZ 临时文件删除成功",
+					"filePath", file,
+					"clientMsgID", s.ClientMsgID)
 			}
-			// log.ZDebug(ctx, "remove temp file:", "file", file)
 		}
 
+		// 更新消息状态并触发会话更新
 		c.updateMsgStatusAndTriggerConversation(ctx, sendMsgResp.ClientMsgID, sendMsgResp.ServerMsgID, sendMsgResp.SendTime, constant.MsgStatusSendSuccess, s, lc, isOnlineOnly)
+		log.ZDebug(ctx, "ZZWWZZWWZZ 消息发送后异步操作完成",
+			"clientMsgID", s.ClientMsgID)
 	}()
-	return s, nil
 
+	return s, nil
 }
 
 func (c *Conversation) FindMessageList(ctx context.Context, req []*sdk_params_callback.ConversationArgs) (*sdk_params_callback.FindMessageListCallback, error) {
