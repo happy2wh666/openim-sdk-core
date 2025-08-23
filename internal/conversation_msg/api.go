@@ -54,9 +54,9 @@ func (c *Conversation) GetAtAllTag(_ context.Context) string {
 }
 
 func (c *Conversation) GetOneConversation(ctx context.Context, sessionType int32, sourceID string) (*model_struct.LocalConversation, error) {
-	// 生成会话ID并记录调试日志
+	// 生成会话ID并记录调试日志，包含ZZWWZZWWZZ标识
 	conversationID := c.getConversationIDBySessionType(sourceID, int(sessionType))
-	log.ZDebug(ctx, "生成会话ID",
+	log.ZDebug(ctx, "ZZWWZZWWZZ 生成会话ID",
 		"sessionType", sessionType,
 		"sourceID", sourceID,
 		"conversationID", conversationID)
@@ -64,14 +64,14 @@ func (c *Conversation) GetOneConversation(ctx context.Context, sessionType int32
 	// 尝试从数据库获取会话
 	lc, err := c.db.GetConversation(ctx, conversationID)
 	if err == nil {
-		log.ZDebug(ctx, "成功从数据库获取会话",
+		log.ZDebug(ctx, "ZZWWZZWWZZ 成功从数据库获取会话",
 			"conversationID", conversationID,
 			"conversation", lc)
 		return lc, nil
 	}
 
 	// 首次获取失败，记录错误并准备创建新会话
-	log.ZDebug(ctx, "首次获取会话失败，准备创建新会话",
+	log.ZDebug(ctx, "ZZWWZZWWZZ 首次获取会话失败，准备创建新会话",
 		"conversationID", conversationID,
 		"error", err)
 
@@ -82,59 +82,59 @@ func (c *Conversation) GetOneConversation(ctx context.Context, sessionType int32
 	// 根据会话类型设置不同属性
 	switch sessionType {
 	case constant.SingleChatType:
-		log.ZDebug(ctx, "处理单聊类型会话",
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理单聊类型会话",
 			"sessionType", sessionType,
 			"sourceID", sourceID)
 
 		newConversation.UserID = sourceID
 		faceUrl, name, err := c.getUserNameAndFaceURL(ctx, sourceID)
 		if err != nil {
-			log.ZDebug(ctx, "获取用户信息失败",
+			log.ZDebug(ctx, "ZZWWZZWWZZ 获取用户信息失败",
 				"sourceID", sourceID,
 				"error", err)
 			return nil, err
 		}
 		newConversation.ShowName = name
 		newConversation.FaceURL = faceUrl
-		log.ZDebug(ctx, "单聊会话信息设置完成",
+		log.ZDebug(ctx, "ZZWWZZWWZZ 单聊会话信息设置完成",
 			"userID", sourceID,
 			"showName", name,
 			"faceUrl", faceUrl)
 
 	case constant.WriteGroupChatType, constant.ReadGroupChatType:
-		log.ZDebug(ctx, "处理群聊类型会话",
+		log.ZDebug(ctx, "ZZWWZZWWZZ 处理群聊类型会话",
 			"sessionType", sessionType,
 			"sourceID", sourceID)
 
 		newConversation.GroupID = sourceID
 		g, err := c.group.FetchGroupOrError(ctx, sourceID)
 		if err != nil {
-			log.ZDebug(ctx, "获取群组信息失败",
+			log.ZDebug(ctx, "ZZWWZZWWZZ 获取群组信息失败",
 				"groupID", sourceID,
 				"error", err)
 			return nil, err
 		}
 		newConversation.ShowName = g.GroupName
 		newConversation.FaceURL = g.FaceURL
-		log.ZDebug(ctx, "群聊会话信息设置完成",
+		log.ZDebug(ctx, "ZZWWZZWWZZ 群聊会话信息设置完成",
 			"groupID", sourceID,
 			"showName", g.GroupName,
 			"faceUrl", g.FaceURL)
 	}
 
 	// 双重检查会话是否已存在
-	log.ZDebug(ctx, "执行双重检查，确认会话是否存在",
+	log.ZDebug(ctx, "ZZWWZZWWZZ 执行双重检查，确认会话是否存在",
 		"conversationID", conversationID)
 	lc, err = c.db.GetConversation(ctx, conversationID)
 	if err == nil {
-		log.ZDebug(ctx, "双重检查发现会话已存在，返回数据库中的会话",
+		log.ZDebug(ctx, "ZZWWZZWWZZ 双重检查发现会话已存在，返回数据库中的会话",
 			"conversationID", conversationID,
 			"conversation", lc)
 		return lc, nil
 	}
 
 	// 返回新创建的会话
-	log.ZDebug(ctx, "双重检查确认会话不存在，返回新创建的会话",
+	log.ZDebug(ctx, "ZZWWZZWWZZ 双重检查确认会话不存在，返回新创建的会话",
 		"conversationID", conversationID,
 		"newConversation", newConversation)
 	return &newConversation, nil
